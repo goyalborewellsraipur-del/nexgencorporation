@@ -83,12 +83,12 @@
     if(!isAdmin()) throw new Error('Admin login required.');
     state = normalize(state);
     const payload = clone(state);
-    const { error } = await sb.from('site_content').upsert({
+    const { error } = await withTimeout(sb.from('site_content').upsert({
       id: SITE_ROW_ID,
       data: payload,
       updated_by: currentUser()?.id || null,
       updated_at: new Date().toISOString()
-    }, { onConflict:'id' });
+    }, { onConflict:'id' }), 30000, 'Live save');
     if(error) throw error;
     saveLocal();
     return true;
@@ -139,9 +139,9 @@
     if(!isAdmin()) throw new Error('Admin login required.');
     if(!file) throw new Error('Please select an image.');
     if(file.size > 12 * 1024 * 1024) throw new Error('Image size must be under 12 MB before compression.');
-    const compressed = await compressImage(file, { maxWidth:1600, quality:0.78 });
+    const compressed = await withTimeout(compressImage(file, { maxWidth:1600, quality:0.78 }), 30000, 'Image compression');
     const path = `${slug(folder)}/${Date.now()}-${slug(nameHint || file.name)}.webp`;
-    const { error: uploadError } = await sb.storage.from(MEDIA_BUCKET).upload(path, compressed.file, { cacheControl:'31536000', upsert:true, contentType:'image/webp' });
+    const { error: uploadError } = await withTimeout(sb.storage.from(MEDIA_BUCKET).upload(path, compressed.file, { cacheControl:'31536000', upsert:true, contentType:'image/webp' }), 60000, 'Image upload');
     if(uploadError) throw uploadError;
     const { data: publicData } = sb.storage.from(MEDIA_BUCKET).getPublicUrl(path);
     const url = publicData && publicData.publicUrl;
@@ -172,6 +172,13 @@
     if(!t){ t = document.createElement('div'); t.id='toast'; t.className='toast'; document.body.appendChild(t); }
     t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2500);
   }
+  function withTimeout(promise, ms, label){
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error((label || 'Request') + ' took too long. Please check Supabase bucket/policies, internet connection, then try again.')), ms))
+    ]);
+  }
+
   function setDocumentMeta(title, desc){
     document.title = title || state.seo?.title || state.company.name || 'NEXGEN CORPORATION';
     const meta = document.querySelector('meta[name="description"]');
@@ -281,16 +288,16 @@
       const file = inputEl?.files?.[0];
       const folder = inputEl?.dataset.uploadFolder || 'general';
       const old = btn.textContent;
-      try{ btn.textContent='Uploading...'; btn.disabled=true; const up = await uploadMedia(file, folder, path); setPath(path, up.url); await saveRemoteSiteData(); toast('Image uploaded and saved live'); adminContent(tab); }catch(err){ alert(err.message || 'Upload failed'); btn.textContent=old; btn.disabled=false; }
+      try{ btn.textContent='Uploading...'; btn.disabled=true; const up = await uploadMedia(file, folder, path); setPath(path, up.url); await saveRemoteSiteData(); toast('Image uploaded and saved live'); adminContent(tab); }catch(err){ console.error(err); alert(err.message || 'Upload failed'); }finally{ btn.textContent=old; btn.disabled=false; }
     });
     document.getElementById('addProduct')?.addEventListener('click', () => { const c=state.categories[0] || {id:'general',title:'General',image:'assets/logo.png'}; state.products.unshift({id:'product-'+Date.now(),name:'New Product',categoryId:c.id,category:c.title,image:c.image,description:'Product description.',price:'Get Quote'}); saveLocal(); adminContent('products'); });
     document.querySelectorAll('[data-delete-product]').forEach(b => b.onclick = () => { if(confirm('Delete this product?')){ state.products.splice(Number(b.dataset.deleteProduct),1); saveLocal(); adminContent('products'); } });
-    document.querySelectorAll('[data-upload-product-image]').forEach(b => b.onclick = async () => { const idx=Number(b.dataset.uploadProductImage); const file=document.querySelector(`[data-product-file="${idx}"]`)?.files?.[0]; const old=b.textContent; try{ b.textContent='Uploading...'; b.disabled=true; const up=await uploadMedia(file, 'products', state.products[idx]?.name || 'product'); state.products[idx].image=up.url; await saveRemoteSiteData(); toast('Product image saved live'); adminContent('products'); }catch(err){ alert(err.message || 'Image upload failed'); b.textContent=old; b.disabled=false; } });
+    document.querySelectorAll('[data-upload-product-image]').forEach(b => b.onclick = async () => { const idx=Number(b.dataset.uploadProductImage); const file=document.querySelector(`[data-product-file="${idx}"]`)?.files?.[0]; const old=b.textContent; try{ b.textContent='Uploading...'; b.disabled=true; const up=await uploadMedia(file, 'products', state.products[idx]?.name || 'product'); state.products[idx].image=up.url; await saveRemoteSiteData(); toast('Product image saved live'); adminContent('products'); }catch(err){ console.error(err); alert(err.message || 'Image upload failed'); }finally{ b.textContent=old; b.disabled=false; } });
     document.getElementById('adminProductSearch')?.addEventListener('input', filterAdminProducts);
     document.getElementById('adminProductCat')?.addEventListener('change', filterAdminProducts);
     document.getElementById('addCategory')?.addEventListener('click', () => { state.categories.push({id:'category-'+Date.now(),title:'New Category',subtitle:'Category description.',image:'assets/logo.png',pdfPage:''}); saveLocal(); adminContent('categories'); });
     document.querySelectorAll('[data-delete-category]').forEach(b => b.onclick = () => { if(confirm('Delete this category?')){ state.categories.splice(Number(b.dataset.deleteCategory),1); saveLocal(); adminContent('categories'); } });
-    document.getElementById('addGalleryImage')?.addEventListener('click', async e => { const b=e.currentTarget; const old=b.textContent; try{ const file=document.getElementById('galleryUpload')?.files?.[0]; b.textContent='Uploading...'; b.disabled=true; const title=document.getElementById('galleryTitle')?.value || 'Gallery Image'; const caption=document.getElementById('galleryCaption')?.value || ''; const up=await uploadMedia(file,'gallery',title); state.gallery.unshift({title,caption,url:up.url,path:up.path,date:new Date().toISOString()}); await saveRemoteSiteData(); toast('Gallery image saved live'); adminContent('gallery'); }catch(err){ alert(err.message || 'Gallery upload failed'); b.textContent=old; b.disabled=false; } });
+    document.getElementById('addGalleryImage')?.addEventListener('click', async e => { const b=e.currentTarget; const old=b.textContent; try{ const file=document.getElementById('galleryUpload')?.files?.[0]; b.textContent='Uploading...'; b.disabled=true; const title=document.getElementById('galleryTitle')?.value || 'Gallery Image'; const caption=document.getElementById('galleryCaption')?.value || ''; const up=await uploadMedia(file,'gallery',title); state.gallery.unshift({title,caption,url:up.url,path:up.path,date:new Date().toISOString()}); await saveRemoteSiteData(); toast('Gallery image saved live'); adminContent('gallery'); }catch(err){ console.error(err); alert(err.message || 'Gallery upload failed'); }finally{ b.textContent=old; b.disabled=false; } });
     document.querySelectorAll('[data-delete-gallery]').forEach(b => b.onclick = () => { if(confirm('Delete this gallery image?')){ state.gallery.splice(Number(b.dataset.deleteGallery),1); saveLocal(); adminContent('gallery'); } });
     document.getElementById('clearEnquiries')?.addEventListener('click', () => { saveEnquiries([]); adminContent('enquiries'); });
     document.getElementById('downloadCsv')?.addEventListener('click', downloadCsv);
