@@ -65,6 +65,36 @@
   }
   function saveLocal(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
 
+  function makeRemotePayload(src){
+    const payload = clone(src);
+
+    // Do not save heavy local media history in site_content. Product/category/gallery URLs are already saved in their own fields.
+    payload.mediaLibrary = Array.isArray(payload.mediaLibrary)
+      ? payload.mediaLibrary.slice(0, 20).map(m => ({
+          url: m.url || '',
+          path: m.path || '',
+          folder: m.folder || '',
+          name: m.name || '',
+          date: m.date || ''
+        }))
+      : [];
+
+    // Remove accidental base64 image strings from JSON save. Files must be saved in Supabase Storage, not inside database JSON.
+    const clean = (v) => {
+      if(typeof v === 'string'){
+        if(v.startsWith('data:image/')) return '';
+        return v;
+      }
+      if(Array.isArray(v)) return v.map(clean);
+      if(v && typeof v === 'object'){
+        Object.keys(v).forEach(k => { v[k] = clean(v[k]); });
+      }
+      return v;
+    };
+
+    return clean(payload);
+  }
+
   async function loadRemoteSiteData(){
     const sb = getSupabase();
     if(!sb) return;
@@ -82,13 +112,13 @@
     if(!sb) throw new Error('Supabase config missing.');
     if(!isAdmin()) throw new Error('Admin login required.');
     state = normalize(state);
-    const payload = clone(state);
+    const payload = makeRemotePayload(state);
     const { error } = await withTimeout(sb.from('site_content').upsert({
       id: SITE_ROW_ID,
       data: payload,
       updated_by: currentUser()?.id || null,
       updated_at: new Date().toISOString()
-    }, { onConflict:'id' }), 30000, 'Live save');
+    }, { onConflict:'id' }), 120000, 'Live save');
     if(error) throw error;
     saveLocal();
     return true;
@@ -175,7 +205,7 @@
   function withTimeout(promise, ms, label){
     return Promise.race([
       promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error((label || 'Request') + ' took too long. Please check Supabase bucket/policies, internet connection, then try again.')), ms))
+      new Promise((_, reject) => setTimeout(() => reject(new Error((label || 'Request') + ' took too long. Please check Supabase table/policies or try Save Live again.')), ms))
     ]);
   }
 
