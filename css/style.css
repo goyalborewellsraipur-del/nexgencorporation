@@ -57,3 +57,41 @@ img{display:block;max-width:100%}
 .admin-product-edit .card-pad{padding:14px}
 @media(max-width:1000px){.gallery-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:640px){.gallery-grid{grid-template-columns:1fr}.gallery-card img{height:220px}}
+
+/* NEXGEN FIX: Product images should not crop after admin upload */
+.product-card > img,
+.product-card img.product-img,
+.product-card img {
+  height: 220px !important;
+  width: 100% !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  background: #ffffff !important;
+  padding: 10px !important;
+}
+
+.admin-product-thumb {
+  height: 220px !important;
+  width: 100% !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  background: #ffffff !important;
+  padding: 10px !important;
+}
+
+.modal-body img,
+.product-detail-img,
+#modalProductImage {
+  max-height: 420px !important;
+  width: 100% !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  background: #ffffff !important;
+}
+
+.gallery-card img {
+  object-fit: contain !important;
+  object-position: center center !important;
+  background: #ffffff !important;
+  padding: 8px !important;
+}
